@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node build/index.js"
+    "start": "node build/index.js",
+    "start-sse": "node build/sse-server.js"
   },
   "bin": {
     "youtube-search": "./build/index.js"
@@ -13,10 +14,13 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.6.7",
     "cheerio": "^1.0.0-rc.12",
+    "express": "^4.21.2",
+    "express-sse": "^0.5.3",
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@types/express": "^5.0.1",
     "@types/node": "^20.11.19",
     "typescript": "^5.3.3"
   }
-} 
+}
