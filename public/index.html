@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube MCP Client</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #c4302b;
+    }
+    .tool-section {
+      margin-bottom: 30px;
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 5px;
+    }
+    .tool-form {
+      margin-bottom: 15px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0 15px;
+      display: inline-block;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      background-color: #c4302b;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #a52521;
+    }
+    .results {
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 15px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    .status {
+      padding: 10px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+    }
+    .status.connecting {
+      color: #856404;
+      background-color: #fff3cd;
+      border: 1px solid #ffeeba;
+    }
+    .status.connected {
+      color: #155724;
+      background-color: #d4edda;
+      border: 1px solid #c3e6cb;
+    }
+    .status.error {
+      color: #721c24;
+      background-color: #f8d7da;
+      border: 1px solid #f5c6cb;
+    }
+    .retry-button {
+      background-color: #007bff;
+      color: white;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .retry-button:hover {
+      background-color: #0069d9;
+    }
+    .video-result {
+      display: flex;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 20px;
+    }
+    .video-thumbnail {
+      flex: 0 0 160px;
+      margin-right: 15px;
+    }
+    .video-thumbnail img {
+      width: 160px;
+      height: 90px;
+      object-fit: cover;
+    }
+    .video-info {
+      flex: 1;
+    }
+    .video-title {
+      font-weight: bold;
+      font-size: 16px;
+      margin-bottom: 5px;
+    }
+    .video-channel {
+      color: #606060;
+      font-size: 14px;
+      margin-bottom: 5px;
+    }
+    .video-meta {
+      color: #606060;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .video-description {
+      font-size: 14px;
+      color: #606060;
+    }
+    .transcript-line {
+      margin-bottom: 8px;
+    }
+    .transcript-time {
+      color: #606060;
+      font-size: 12px;
+      margin-right: 10px;
+      display: inline-block;
+      width: 60px;
+    }
+    .server-info {
+      margin-top: 5px;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>YouTube MCP Client</h1>
+  <div id="connection-status" class="status connecting">Not connected to MCP server</div>
+  <div id="server-info" class="server-info"></div>
+  
+  <div class="tool-section">
+    <h2>YouTube Search</h2>
+    <div class="tool-form">
+      <label for="search-query">Search Query:</label>
+      <input type="text" id="search-query" placeholder="Enter search query" value="javascript tutorial">
+      
+      <label for="search-limit">Result Limit (1-10):</label>
+      <input type="number" id="search-limit" min="1" max="10" value="3">
+      
+      <button id="search-button">Search</button>
+    </div>
+    <div id="search-results" class="results"></div>
+  </div>
+  
+  <div class="tool-section">
+    <h2>Video Info</h2>
+    <div class="tool-form">
+      <label for="video-url">Video URL or ID:</label>
+      <input type="text" id="video-url" placeholder="Enter YouTube URL or video ID" value="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+      
+      <button id="info-button">Get Info</button>
+    </div>
+    <div id="info-results" class="results"></div>
+  </div>
+  
+  <div class="tool-section">
+    <h2>Video Transcript</h2>
+    <div class="tool-form">
+      <label for="transcript-url">Video URL or ID:</label>
+      <input type="text" id="transcript-url" placeholder="Enter YouTube URL or video ID" value="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+      
+      <button id="transcript-button">Get Transcript</button>
+    </div>
+    <div id="transcript-results" class="results"></div>
+  </div>
+
+  <div class="tool-section">
+    <h2>API Test</h2>
+    <div class="tool-form">
+      <button id="test-button">Test API (Main Server)</button>
+      <button id="session-button">Test Session (Main Server)</button>
+      <hr>
+      <button id="test-server-button">Test API (Test Server)</button>
+      <button id="session-server-button">Test Session (Test Server)</button>
+    </div>
+    <div id="test-results" class="results"></div>
+  </div>
+
+  <script>
+    let sessionId = null;
+    let eventSource = null;
+    
+    // Update the connection status with visual indicator
+    function updateConnectionStatus(message, type = 'connecting') {
+      const status = document.getElementById('connection-status');
+      status.textContent = message;
+      status.className = `status ${type}`;
+      
+      // Add retry button if there's an error
+      if (type === 'error' && !document.getElementById('retry-button')) {
+        const retryButton = document.createElement('button');
+        retryButton.id = 'retry-button';
+        retryButton.className = 'retry-button';
+        retryButton.textContent = 'Retry Connection';
+        retryButton.onclick = initializeConnection;
+        status.appendChild(retryButton);
+      } else if (type !== 'error') {
+        // Remove retry button if not an error
+        const retryButton = document.getElementById('retry-button');
+        if (retryButton) {
+          retryButton.remove();
+        }
+      }
+    }
+    
+    // Get a session ID and then connect to SSE
+    async function initializeConnection() {
+      updateConnectionStatus('Getting session ID...');
+      
+      try {
+        // Step 1: Get a session ID
+        const response = await fetch('http://localhost:3000/session');
+        if (!response.ok) {
+          throw new Error(`Failed to get session ID: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        sessionId = data.sessionId;
+        updateConnectionStatus(`Got session ID: ${sessionId}, connecting to SSE...`);
+        
+        // Step 2: Connect to SSE with the session ID
+        connectToSSE();
+      } catch (error) {
+        updateConnectionStatus(`Error: ${error.message}`, 'error');
+        console.error('Connection error:', error);
+      }
+    }
+    
+    // Connect to SSE endpoint with session ID
+    function connectToSSE() {
+      if (!sessionId) {
+        updateConnectionStatus('No session ID available', 'error');
+        return;
+      }
+      
+      // Close any existing connection
+      if (eventSource) {
+        eventSource.close();
+      }
+      
+      updateConnectionStatus(`Connecting with session ID: ${sessionId}...`);
+      
+      try {
+        eventSource = new EventSource(`http://localhost:3000/sse?sessionId=${sessionId}`);
+        
+        eventSource.onopen = () => {
+          updateConnectionStatus(`Connected to MCP server (Session: ${sessionId})`, 'connected');
+          console.log('SSE connection established');
+        };
+        
+        eventSource.onmessage = (event) => {
+          console.log('Received message:', event.data);
+        };
+        
+        eventSource.onerror = (error) => {
+          console.error('EventSource error:', error);
+          updateConnectionStatus('Error connecting to MCP server. Click retry to reconnect.', 'error');
+          eventSource.close();
+        };
+      } catch (error) {
+        console.error('Error creating EventSource:', error);
+        updateConnectionStatus(`Error creating SSE connection: ${error.message}`, 'error');
+      }
+    }
+    
+    // Initialize connection
+    initializeConnection();
+    
+    // Helper function to send tool calls
+    async function callTool(name, args) {
+      if (!sessionId) {
+        throw new Error('Not connected to server. Please wait for connection to establish.');
+      }
+      
+      // Check if SSE connection is active
+      if (!eventSource || eventSource.readyState !== 1) {
+        // If not active, try to reconnect
+        updateConnectionStatus('Connection lost or not established. Reconnecting...', 'connecting');
+        connectToSSE();
+        
+        // Wait a moment for the connection to establish
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // If still not connected, throw error
+        if (!eventSource || eventSource.readyState !== 1) {
+          throw new Error('Could not establish SSE connection. Please try again later.');
+        }
+      }
+      
+      const response = await fetch(`http://localhost:3000/messages?sessionId=${sessionId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'call_tool',
+          params: {
+            name,
+            arguments: args
+          },
+          id: Date.now()
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        // If we get a 404 for the session, try to reconnect
+        if (response.status === 404) {
+          updateConnectionStatus('Session expired. Reconnecting...', 'connecting');
+          await initializeConnection();
+          return callTool(name, args); // Retry the call
+        }
+        
+        const errorMessage = result?.error?.message || `HTTP error: ${response.status}`;
+        throw new Error(errorMessage);
+      }
+      
+      if (result.error) {
+        throw new Error(result.error.message || 'Unknown error');
+      }
+      
+      return result.result;
+    }
+    
+    // YouTube Search
+    document.getElementById('search-button').addEventListener('click', async () => {
+      const query = document.getElementById('search-query').value;
+      const limit = parseInt(document.getElementById('search-limit').value) || 3;
+      const resultsDiv = document.getElementById('search-results');
+      
+      if (!query) {
+        resultsDiv.textContent = 'Please enter a search query';
+        return;
+      }
+      
+      try {
+        resultsDiv.textContent = 'Searching...';
+        const result = await callTool('youtube_search', { query, limit });
+        
+        if (!result.content || !result.content[0] || !result.content[0].text) {
+          throw new Error('Invalid response format');
+        }
+        
+        const videos = JSON.parse(result.content[0].text);
+        resultsDiv.innerHTML = '';
+        
+        if (!Array.isArray(videos) || videos.length === 0) {
+          resultsDiv.textContent = 'No videos found';
+          return;
+        }
+        
+        videos.forEach(video => {
+          const videoEl = document.createElement('div');
+          videoEl.className = 'video-result';
+          videoEl.innerHTML = `
+            <div class="video-thumbnail">
+              <a href="${video.url}" target="_blank">
+                <img src="${video.thumbnailUrl}" alt="${video.title}">
+              </a>
+            </div>
+            <div class="video-info">
+              <div class="video-title"><a href="${video.url}" target="_blank">${video.title}</a></div>
+              <div class="video-channel">
+                <a href="${video.channel.url}" target="_blank">${video.channel.name}</a>
+              </div>
+              <div class="video-meta">${video.viewCount || ''} ${video.publishedTime || ''}</div>
+              <div class="video-description">${video.description || ''}</div>
+            </div>
+          `;
+          resultsDiv.appendChild(videoEl);
+        });
+      } catch (error) {
+        resultsDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    // Video Info
+    document.getElementById('info-button').addEventListener('click', async () => {
+      const input = document.getElementById('video-url').value;
+      const resultsDiv = document.getElementById('info-results');
+      
+      if (!input) {
+        resultsDiv.textContent = 'Please enter a video URL or ID';
+        return;
+      }
+      
+      try {
+        resultsDiv.textContent = 'Fetching video info...';
+        const result = await callTool('youtube_get_video_info', { input });
+        
+        if (!result.content || !result.content[0] || !result.content[0].text) {
+          throw new Error('Invalid response format');
+        }
+        
+        const videoInfo = JSON.parse(result.content[0].text);
+        
+        if (videoInfo.error) {
+          throw new Error(videoInfo.error);
+        }
+        
+        resultsDiv.innerHTML = `
+          <div class="video-result">
+            <div class="video-thumbnail">
+              <a href="${videoInfo.url}" target="_blank">
+                <img src="${videoInfo.thumbnailUrl}" alt="${videoInfo.title}">
+              </a>
+            </div>
+            <div class="video-info">
+              <div class="video-title"><a href="${videoInfo.url}" target="_blank">${videoInfo.title}</a></div>
+              <div class="video-channel">
+                <a href="${videoInfo.channel.url}" target="_blank">${videoInfo.channel.name}</a>
+              </div>
+              <div class="video-meta">${videoInfo.viewCount || ''} ${videoInfo.publishDate || ''}</div>
+              <div class="video-description">${videoInfo.description || ''}</div>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        resultsDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    // Video Transcript
+    document.getElementById('transcript-button').addEventListener('click', async () => {
+      const input = document.getElementById('transcript-url').value;
+      const resultsDiv = document.getElementById('transcript-results');
+      
+      if (!input) {
+        resultsDiv.textContent = 'Please enter a video URL or ID';
+        return;
+      }
+      
+      try {
+        resultsDiv.textContent = 'Fetching transcript...';
+        const result = await callTool('youtube_get_transcript', { input });
+        
+        if (!result.content || !result.content[0] || !result.content[0].text) {
+          throw new Error('Invalid response format');
+        }
+        
+        const data = JSON.parse(result.content[0].text);
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        resultsDiv.innerHTML = `
+          <h3>${data.videoInfo.title}</h3>
+          <p>Channel: ${data.videoInfo.channel.name}</p>
+          <p>Duration: ${formatDuration(data.videoInfo.duration)}</p>
+          <hr>
+          <div class="transcript-container">
+            ${data.transcript.map(line => `
+              <div class="transcript-line">
+                <span class="transcript-time">${formatTime(line.time)}</span>
+                <span class="transcript-text">${line.text}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } catch (error) {
+        resultsDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    // Helper to format duration
+    function formatDuration(seconds) {
+      if (!seconds) return '';
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    // Helper to format time
+    function formatTime(seconds) {
+      if (!seconds) return '';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    // Check server status
+    async function checkServerStatus() {
+      try {
+        const response = await fetch('http://localhost:3000/status');
+        if (!response.ok) {
+          throw new Error(`Server status error: ${response.status}`);
+        }
+        
+        const status = await response.json();
+        const serverInfo = document.getElementById('server-info');
+        
+        serverInfo.innerHTML = `
+          <strong>Server:</strong> ${status.status} | 
+          <strong>Active connections:</strong> ${status.activeConnections} |
+          <strong>Available tools:</strong> ${status.tools.map(t => t.name).join(', ')}
+        `;
+        
+        return true;
+      } catch (error) {
+        console.error('Status check error:', error);
+        const serverInfo = document.getElementById('server-info');
+        serverInfo.innerHTML = `<span style="color: #721c24;">Server status check failed. ${error.message}</span>`;
+        return false;
+      }
+    }
+    
+    // Check status initially and periodically
+    checkServerStatus();
+    setInterval(checkServerStatus, 10000); // Check every 10 seconds
+
+    // Add test button handlers
+    document.getElementById('test-button').addEventListener('click', async () => {
+      const resultsDiv = document.getElementById('test-results');
+      resultsDiv.textContent = 'Testing main server API...';
+      
+      try {
+        const response = await fetch('http://localhost:3000/test');
+        const data = await response.json();
+        resultsDiv.textContent = `Main server test result: ${JSON.stringify(data)}`;
+      } catch (error) {
+        resultsDiv.textContent = `Error with main server: ${error.message}`;
+      }
+    });
+    
+    document.getElementById('session-button').addEventListener('click', async () => {
+      const resultsDiv = document.getElementById('test-results');
+      resultsDiv.textContent = 'Testing main server session endpoint...';
+      
+      try {
+        const response = await fetch('http://localhost:3000/session');
+        const data = await response.json();
+        resultsDiv.textContent = `Main server session result: ${JSON.stringify(data)}`;
+      } catch (error) {
+        resultsDiv.textContent = `Error with main server: ${error.message}`;
+      }
+    });
+
+    document.getElementById('test-server-button').addEventListener('click', async () => {
+      const resultsDiv = document.getElementById('test-results');
+      resultsDiv.textContent = 'Testing test server API...';
+      
+      try {
+        const response = await fetch('http://localhost:3001/test');
+        const data = await response.json();
+        resultsDiv.textContent = `Test server result: ${JSON.stringify(data)}`;
+      } catch (error) {
+        resultsDiv.textContent = `Error with test server: ${error.message}`;
+      }
+    });
+    
+    document.getElementById('session-server-button').addEventListener('click', async () => {
+      const resultsDiv = document.getElementById('test-results');
+      resultsDiv.textContent = 'Testing test server session endpoint...';
+      
+      try {
+        const response = await fetch('http://localhost:3001/session');
+        const data = await response.json();
+        resultsDiv.textContent = `Test server session result: ${JSON.stringify(data)}`;
+      } catch (error) {
+        resultsDiv.textContent = `Error with test server: ${error.message}`;
+      }
+    });
+  </script>
+</body>
+</html> 

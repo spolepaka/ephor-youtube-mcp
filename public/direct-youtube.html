@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Direct YouTube API Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      color: #c4302b;
+    }
+    .tool-section {
+      margin-bottom: 30px;
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 5px;
+    }
+    .tool-form {
+      margin-bottom: 15px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0 15px;
+      display: inline-block;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      background-color: #c4302b;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #a52521;
+    }
+    .results {
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 15px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    .video-result {
+      display: flex;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 20px;
+    }
+    .video-thumbnail {
+      flex: 0 0 160px;
+      margin-right: 15px;
+    }
+    .video-thumbnail img {
+      width: 160px;
+      height: 90px;
+      object-fit: cover;
+    }
+    .video-info {
+      flex: 1;
+    }
+    .video-title {
+      font-weight: bold;
+      font-size: 16px;
+      margin-bottom: 5px;
+    }
+    .transcript-line {
+      margin-bottom: 8px;
+    }
+    .transcript-time {
+      color: #606060;
+      font-size: 12px;
+      margin-right: 10px;
+      display: inline-block;
+      width: 60px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Direct YouTube API Test</h1>
+  <p>Test the YouTube API directly without going through MCP</p>
+  
+  <div class="tool-section">
+    <h2>YouTube Search</h2>
+    <div class="tool-form">
+      <label for="search-query">Search Query:</label>
+      <input type="text" id="search-query" placeholder="Enter search query" value="javascript tutorial">
+      
+      <label for="search-limit">Result Limit (1-10):</label>
+      <input type="number" id="search-limit" min="1" max="10" value="3">
+      
+      <button id="search-button">Search</button>
+    </div>
+    <div id="search-results" class="results"></div>
+  </div>
+  
+  <div class="tool-section">
+    <h2>Video Info</h2>
+    <div class="tool-form">
+      <label for="video-url">Video URL or ID:</label>
+      <input type="text" id="video-url" placeholder="Enter YouTube URL or video ID" value="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+      
+      <button id="info-button">Get Info</button>
+    </div>
+    <div id="info-results" class="results"></div>
+  </div>
+  
+  <div class="tool-section">
+    <h2>Video Transcript</h2>
+    <div class="tool-form">
+      <label for="transcript-url">Video URL or ID:</label>
+      <input type="text" id="transcript-url" placeholder="Enter YouTube URL or video ID" value="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+      
+      <button id="transcript-button">Get Transcript</button>
+    </div>
+    <div id="transcript-results" class="results"></div>
+  </div>
+
+  <script>
+    const PORT = 3000; // Main server port
+    
+    // YouTube Search
+    document.getElementById('search-button').addEventListener('click', async () => {
+      const query = document.getElementById('search-query').value;
+      const limit = parseInt(document.getElementById('search-limit').value) || 3;
+      const resultsDiv = document.getElementById('search-results');
+      
+      if (!query) {
+        resultsDiv.textContent = 'Please enter a search query';
+        return;
+      }
+      
+      try {
+        resultsDiv.textContent = 'Searching...';
+        
+        const response = await fetch(`http://localhost:${PORT}/direct/youtube-search`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ query, limit })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.results || data.results.length === 0) {
+          resultsDiv.textContent = 'No videos found';
+          return;
+        }
+        
+        resultsDiv.innerHTML = '';
+        data.results.forEach(video => {
+          const videoEl = document.createElement('div');
+          videoEl.className = 'video-result';
+          videoEl.innerHTML = `
+            <div class="video-thumbnail">
+              <a href="${video.url}" target="_blank">
+                <img src="${video.thumbnailUrl}" alt="${video.title}">
+              </a>
+            </div>
+            <div class="video-info">
+              <div class="video-title"><a href="${video.url}" target="_blank">${video.title}</a></div>
+              <div>${video.channel.name}</div>
+              <div>${video.viewCount || ''} ${video.publishedTime || ''}</div>
+              <div>${video.description || ''}</div>
+            </div>
+          `;
+          resultsDiv.appendChild(videoEl);
+        });
+      } catch (error) {
+        resultsDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    // Video Info
+    document.getElementById('info-button').addEventListener('click', async () => {
+      const input = document.getElementById('video-url').value;
+      const resultsDiv = document.getElementById('info-results');
+      
+      if (!input) {
+        resultsDiv.textContent = 'Please enter a video URL or ID';
+        return;
+      }
+      
+      try {
+        resultsDiv.textContent = 'Fetching video info...';
+        
+        const response = await fetch(`http://localhost:${PORT}/direct/youtube-video-info`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ input })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        const video = data.result;
+        resultsDiv.innerHTML = `
+          <div class="video-result">
+            <div class="video-thumbnail">
+              <a href="${video.url}" target="_blank">
+                <img src="${video.thumbnailUrl}" alt="${video.title}">
+              </a>
+            </div>
+            <div class="video-info">
+              <div class="video-title"><a href="${video.url}" target="_blank">${video.title}</a></div>
+              <div>Channel: ${video.channel.name}</div>
+              <div>Views: ${video.viewCount || 'Unknown'}</div>
+              <div>Published: ${video.publishDate || 'Unknown'}</div>
+              <div>Description: ${video.description || 'No description'}</div>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        resultsDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    // Video Transcript
+    document.getElementById('transcript-button').addEventListener('click', async () => {
+      const input = document.getElementById('transcript-url').value;
+      const resultsDiv = document.getElementById('transcript-results');
+      
+      if (!input) {
+        resultsDiv.textContent = 'Please enter a video URL or ID';
+        return;
+      }
+      
+      try {
+        resultsDiv.textContent = 'Fetching transcript...';
+        
+        const response = await fetch(`http://localhost:${PORT}/direct/youtube-transcript`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ input })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        resultsDiv.innerHTML = `
+          <h3>${data.videoInfo.title}</h3>
+          <p>Channel: ${data.videoInfo.channel.name}</p>
+          <p>Duration: ${formatDuration(data.videoInfo.duration)}</p>
+          <hr>
+          <div>
+            ${data.transcript.slice(0, 20).map(line => `
+              <div class="transcript-line">
+                <span class="transcript-time">${formatTime(line.time)}</span>
+                <span>${line.text}</span>
+              </div>
+            `).join('')}
+            ${data.transcript.length > 20 ? '<div><em>... transcript truncated (showing first 20 lines) ...</em></div>' : ''}
+          </div>
+        `;
+      } catch (error) {
+        resultsDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    // Helper to format duration
+    function formatDuration(seconds) {
+      if (!seconds) return 'Unknown';
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    // Helper to format time
+    function formatTime(seconds) {
+      if (!seconds) return '00:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+  </script>
+</body>
+</html> 

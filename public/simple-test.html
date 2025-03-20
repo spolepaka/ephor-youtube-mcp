@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple MCP Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .status {
+      padding: 10px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+    }
+    .connecting {
+      background-color: #fff3cd;
+    }
+    .connected {
+      background-color: #d4edda;
+    }
+    .error {
+      background-color: #f8d7da;
+    }
+    button {
+      padding: 8px 15px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background-color: #0069d9;
+    }
+    .results {
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 15px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simple MCP Test</h1>
+  <div id="status" class="status connecting">Not connected</div>
+  
+  <div>
+    <button id="connect-btn">Connect</button>
+    <button id="test-btn" disabled>Test Echo Tool</button>
+    <button id="simple-test-btn">Test Simple Echo</button>
+    <button id="clear-btn">Clear Results</button>
+  </div>
+  
+  <div id="results" class="results"></div>
+  
+  <script>
+    const PORT = 3002; // Match the port in simple-server.ts
+    let sessionId = null;
+    let eventSource = null;
+    
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const connectBtn = document.getElementById('connect-btn');
+    const testBtn = document.getElementById('test-btn');
+    const simpleTestBtn = document.getElementById('simple-test-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    
+    function log(message) {
+      const timestamp = new Date().toISOString().substr(11, 8);
+      resultsEl.textContent += `[${timestamp}] ${message}\n`;
+      resultsEl.scrollTop = resultsEl.scrollHeight;
+    }
+    
+    async function getSession() {
+      try {
+        log('Getting session ID...');
+        statusEl.textContent = 'Getting session ID...';
+        statusEl.className = 'status connecting';
+        
+        const response = await fetch(`http://localhost:${PORT}/session`);
+        if (!response.ok) {
+          throw new Error(`Failed to get session: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        sessionId = data.sessionId;
+        log(`Got session ID: ${sessionId}`);
+        return sessionId;
+      } catch (error) {
+        log(`Error getting session: ${error.message}`);
+        statusEl.textContent = `Error: ${error.message}`;
+        statusEl.className = 'status error';
+        throw error;
+      }
+    }
+    
+    async function connectSSE() {
+      if (!sessionId) {
+        await getSession();
+      }
+      
+      try {
+        if (eventSource) {
+          eventSource.close();
+        }
+        
+        log(`Connecting to SSE with session ${sessionId}...`);
+        statusEl.textContent = 'Connecting to server...';
+        statusEl.className = 'status connecting';
+        
+        eventSource = new EventSource(`http://localhost:${PORT}/sse?sessionId=${sessionId}`);
+        
+        eventSource.onopen = () => {
+          log('SSE connection established');
+          statusEl.textContent = `Connected (Session: ${sessionId})`;
+          statusEl.className = 'status connected';
+          testBtn.disabled = false;
+        };
+        
+        eventSource.onmessage = (event) => {
+          log(`Received message: ${event.data}`);
+        };
+        
+        eventSource.onerror = (error) => {
+          log(`SSE error: ${error}`);
+          statusEl.textContent = 'Connection error';
+          statusEl.className = 'status error';
+          testBtn.disabled = true;
+          eventSource.close();
+        };
+      } catch (error) {
+        log(`Error connecting: ${error.message}`);
+        statusEl.textContent = `Error: ${error.message}`;
+        statusEl.className = 'status error';
+        testBtn.disabled = true;
+      }
+    }
+    
+    async function testEchoTool() {
+      if (!sessionId) {
+        log('No session ID available');
+        return;
+      }
+      
+      try {
+        log('Calling echo tool...');
+        
+        const response = await fetch(`http://localhost:${PORT}/messages?sessionId=${sessionId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'call_tool',
+            params: {
+              name: 'echo',
+              arguments: {
+                message: 'Hello from simple test!'
+              }
+            },
+            id: Date.now()
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        log(`Response: ${JSON.stringify(result, null, 2)}`);
+        
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+      } catch (error) {
+        log(`Error calling tool: ${error.message}`);
+      }
+    }
+    
+    async function simpleEchoTest() {
+      try {
+        log('Calling echo tool via simple endpoint...');
+        
+        const response = await fetch(`http://localhost:${PORT}/simple-call?sessionId=${sessionId || 'none'}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'echo',
+            arguments: {
+              message: 'Hello from simple test!'
+            }
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        log(`Response: ${JSON.stringify(result, null, 2)}`);
+        
+        if (result.error) {
+          throw new Error(result.error.message || 'Unknown error');
+        }
+      } catch (error) {
+        log(`Error calling simple tool: ${error.message}`);
+      }
+    }
+    
+    // Event listeners
+    connectBtn.addEventListener('click', () => {
+      sessionId = null; // Force getting a new session
+      connectSSE();
+    });
+    
+    testBtn.addEventListener('click', testEchoTool);
+    
+    simpleTestBtn.addEventListener('click', simpleEchoTest);
+    
+    clearBtn.addEventListener('click', () => {
+      resultsEl.textContent = '';
+    });
+  </script>
+</body>
+</html> 

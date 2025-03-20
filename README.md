@@ -1,193 +1,131 @@
-# YouTube MCP Server (NO API REQUIRED)
+# YouTube MCP Integration
 
-A Model Context Protocol (MCP) server that enables YouTube search, video info retrieval, and transcript extraction with NO API KEYS required.
+This project provides a [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol/typescript-sdk) integration for YouTube, allowing LLMs to search YouTube, get video information, and retrieve transcripts via standardized tools.
 
 ## Features
 
-* Search YouTube videos with customizable result limits
-* Get detailed video information from any YouTube URL or video ID
-* Extract video transcripts (captions) with timestamps
-* No API keys or authentication required
-* Support for multiple YouTube URL formats
-* Automatic language selection (prioritizes English)
-* Returns structured results with rich metadata
+- **YouTube Search Tool**: Search for videos on YouTube with configurable result limits
+- **Video Info Tool**: Get detailed information about a YouTube video
+- **Transcript Tool**: Retrieve and parse the transcript of a YouTube video
 
-## Installation
+## Architecture
 
-1. Clone or download this repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Build the server:
-   ```bash
-   npm run build
-   ```
-4. Add the server to your MCP configuration:
+The implementation follows the Model Context Protocol (MCP) specification, which standardizes how LLMs interact with external tools and resources. The architecture consists of:
 
-  For Claude Desktop:
-  ```json
-  {
-    "mcpServers": {
-      "youtube-search": {
-        "command": "node",
-        "args": ["/absolute/path/to/youtube-mcp/build/index.js"]
-      }
-    }
+1. **MCP Server**: Provides YouTube functionality as MCP tools through HTTP/SSE transport
+2. **YouTube API Integration**: Scrapes YouTube data to provide search, video info, and transcript functionality
+3. **MCP Client**: Example client showing how to consume the MCP YouTube tools
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- npm
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-username/ephor-youtube-mcp.git
+cd ephor-youtube-mcp
+
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+```
+
+### Running the Server
+
+Start the MCP server:
+
+```bash
+npm run start
+```
+
+The server will start on http://localhost:3000 with the following endpoints:
+- SSE endpoint: `/sse`
+- Message endpoint: `/messages`
+
+### Using with an MCP Client
+
+The MCP tools can be used with any MCP-compatible client. Here's an example of how to use the tools:
+
+```typescript
+// Initialize client
+const client = new Client(
+  { name: 'youtube-client', version: '1.0.0' },
+  { capabilities: { tools: {} } }
+);
+
+// Connect to the server
+await client.connect(transport);
+
+// Search YouTube
+const searchResults = await client.callTool({
+  name: 'youtube_search',
+  arguments: {
+    query: 'javascript tutorial',
+    limit: 3
   }
-  ```
-  (Replace with the absolute path to the index.js file on your system)
+});
 
-  Configuration file location:
-  - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-  - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-  For Cursor:
-  1. Go to Settings → MCP → Add a new MCP server
-  2. Fill in the fields:
-    - Name: youtube
-    - Type: command
-    - Command: node /absolute/path/to/youtube-mcp/build/index.js
-    
-    (Replace with the absolute path to the index.js file on your system)
-
-## Usage
-
-The server provides three tools:
-
-### 1. Search Tool (`search`)
-```json
-{
-  "query": string,    // The search query
-  "limit": number     // Optional: Number of results to return (default: 5, max: 10)
-}
-```
-
-Example response:
-```json
-[
-  {
-    "videoId": "dQw4w9WgXcQ",
-    "title": "Video Title",
-    "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
-    "thumbnailUrl": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
-    "description": "Video description...",
-    "channel": {
-      "name": "Channel Name",
-      "url": "https://youtube.com/channel/..."
-    },
-    "viewCount": "1M views",
-    "publishedTime": "3 years ago"
+// Get video info
+const videoInfo = await client.callTool({
+  name: 'youtube_get_video_info',
+  arguments: {
+    input: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
   }
-]
+});
+
+// Get video transcript
+const transcript = await client.callTool({
+  name: 'youtube_get_transcript',
+  arguments: {
+    input: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  }
+});
 ```
 
-### 2. Video Info Tool (`get-video-info`)
-```json
-{
-  "input": string    // YouTube video ID or URL
-}
-```
+## Available Tools
 
-Supported URL formats:
-- Direct video ID: `dQw4w9WgXcQ`
-- Standard watch URL: `https://www.youtube.com/watch?v=dQw4w9WgXcQ`
-- Short URL: `https://youtu.be/dQw4w9WgXcQ`
-- Embed URL: `https://www.youtube.com/embed/dQw4w9WgXcQ`
-- Mobile URL: `https://m.youtube.com/watch?v=dQw4w9WgXcQ`
-- Music URL: `https://music.youtube.com/watch?v=dQw4w9WgXcQ`
+### `youtube_search`
 
-### 3. Transcript Tool (`get-transcript`)
-```json
-{
-  "input": string    // YouTube video ID or URL
-}
-```
+Search for YouTube videos.
 
-Example response:
-```json
-{
-  "videoId": "dQw4w9WgXcQ",
-  "videoInfo": {
-    "title": "Video Title",
-    "channel": {
-      "name": "Channel Name"
-    },
-    "duration": "212"
-  },
-  "transcript": [
-    {
-      "time": "0.00",
-      "text": "First caption..."
-    },
-    {
-      "time": "2.50",
-      "text": "Next caption..."
-    }
-  ]
-}
-```
+**Arguments:**
+- `query` (string, required): The search query
+- `limit` (number, optional): Maximum number of results (1-10, default: 5)
 
-## Limitations
+**Response:**
+A list of video results with details like title, video ID, URL, thumbnail, description, channel info, view count, and publish date.
 
-Since this tool uses web scraping of YouTube pages, there are some important limitations to be aware of:
+### `youtube_get_video_info`
 
-1. **Rate Limiting**:
-   * YouTube may temporarily block requests if too many are made in a short time
-   * Keep requests to a reasonable frequency
-   * Consider implementing delays between requests
-   * Use the limit parameter judiciously
+Get detailed information about a YouTube video.
 
-2. **Transcript Availability**:
-   * Not all videos have transcripts/captions available
-   * Some videos may only have auto-generated captions
-   * Some videos may only have non-English captions
-   * Private videos are not accessible
+**Arguments:**
+- `input` (string, required): YouTube video ID or URL
 
-3. **Result Accuracy**:
-   * The tool relies on YouTube's HTML structure, which may change
-   * Some metadata might be missing or incomplete
-   * Search results may vary based on region/language settings
+**Response:**
+Detailed video information including title, description, view count, publish date, channel details, and thumbnail URL.
 
-4. **Legal Considerations**:
-   * This tool is intended for personal use
-   * Respect YouTube's terms of service
-   * Consider implementing appropriate rate limiting for your use case
+### `youtube_get_transcript`
 
-## Error Handling
+Get the transcript of a YouTube video.
 
-The server provides clear error messages for common issues:
+**Arguments:**
+- `input` (string, required): YouTube video ID or URL
 
-1. Invalid video IDs or URLs:
-   ```json
-   {
-     "error": "Invalid YouTube video ID or URL: input"
-   }
-   ```
+**Response:**
+The video transcript with timestamped entries, along with basic video information.
 
-2. Missing transcripts:
-   ```json
-   {
-     "error": "No transcript available for this video"
-   }
-   ```
+## License
 
-3. Network or parsing errors:
-   ```json
-   {
-     "error": "Failed to fetch video data: HTTP error status 429"
-   }
-   ```
+MIT
 
-## Contributing
+## Acknowledgements
 
-Feel free to submit issues and enhancement requests!
-
-## Connect & Feedback
-
-Have questions, suggestions, or need help with this tool? Connect with me:
-
-- GitHub: [@spolepaka/youtube-mcp](https://github.com/spolepaka/youtube-mcp)
-- X (Twitter): [@skpolepaka](https://x.com/skpolepaka)
-
-Your feedback helps improve this tool for everyone!
+- [Model Context Protocol](https://github.com/modelcontextprotocol/typescript-sdk)
