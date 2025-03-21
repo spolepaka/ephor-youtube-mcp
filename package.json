@@ -16,7 +16,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
     "cheerio": "^1.0.0-rc.12",
+    "eventsource": "^2.0.2",
     "express": "^4.18.2",
+    "node-fetch": "^2.6.7",
     "zod": "^3.22.4"
   },
   "devDependencies": {

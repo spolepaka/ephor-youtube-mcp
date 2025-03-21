@@ -1,0 +1,14 @@
+{
+  "name": "mcp-sse-test",
+  "version": "1.0.0",
+  "description": "Test script for MCP SSE endpoint",
+  "main": "test-mcp-sse.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test-mcp-sse.js"
+  },
+  "dependencies": {
+    "eventsource": "^2.0.2",
+    "node-fetch": "^2.6.7"
+  }
+} 

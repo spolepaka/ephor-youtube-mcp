@@ -401,7 +401,7 @@ app.get("/sse", async (req: Request, res: Response) => {
   
   console.log(`[${new Date().toISOString()}] GET /sse - SessionID: ${sessionId}`);
   
-  // Set CORS headers
+  // Set basic CORS header (let the transport handle the rest)
   res.header('Access-Control-Allow-Origin', '*');
   
   // Create a new SSE transport for this client
@@ -412,7 +412,7 @@ app.get("/sse", async (req: Request, res: Response) => {
   if (activeTransports.has(sessionId)) {
     console.log(`Replacing existing transport for session ${sessionId}`);
     activeTransports.delete(sessionId);
-    connectionCount--;
+    if (connectionCount > 0) connectionCount--; // Prevent negative counts
   }
   
   // Store the transport with its session ID
@@ -422,27 +422,41 @@ app.get("/sse", async (req: Request, res: Response) => {
   console.log(`Client connected with session ${sessionId} (Total connections: ${connectionCount})`);
   console.log(`Active transports after connection: ${Array.from(activeTransports.keys()).join(', ')}`);
   
+  // Debug the transport
+  console.log(`Transport type: ${transport.constructor.name}`);
+  
   try {
     console.log(`Connecting MCP server to transport for session ${sessionId}`);
-    // Let the MCP transport handle the response
+    
+    // Let the MCP transport handle everything (including headers and SSE setup)
     await server.connect(transport);
     console.log(`MCP server successfully connected to transport for session ${sessionId}`);
     
     // Handle client disconnect
     req.on('close', () => {
       console.log(`Cleaning up on disconnect for session ${sessionId}`);
-      activeTransports.delete(sessionId);
-      connectionCount--;
-      console.log(`Client with session ${sessionId} disconnected (Total connections: ${connectionCount})`);
-      console.log(`Active transports after disconnect: ${Array.from(activeTransports.keys()).join(', ')}`);
+      
+      if (activeTransports.has(sessionId)) {
+        activeTransports.delete(sessionId);
+        if (connectionCount > 0) connectionCount--; // Prevent negative counts
+        console.log(`Client with session ${sessionId} disconnected (Total connections: ${connectionCount})`);
+        console.log(`Active transports after disconnect: ${Array.from(activeTransports.keys()).join(', ')}`);
+      }
     });
   } catch (error) {
     console.error(`Error connecting transport for session ${sessionId}:`, error);
     console.log(`Cleaning up on error for session ${sessionId}`);
-    res.end();
-    activeTransports.delete(sessionId);
-    connectionCount--;
+    
+    if (activeTransports.has(sessionId)) {
+      activeTransports.delete(sessionId);
+      if (connectionCount > 0) connectionCount--; // Prevent negative counts
+    }
     console.log(`Active transports after error: ${Array.from(activeTransports.keys()).join(', ')}`);
+    
+    // End the response since we couldn't connect properly
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
 });
 
@@ -614,29 +628,47 @@ app.post("/messages", async (req: Request, res: Response) => {
       console.error(`MCP transport error:`, error);
       console.error(`Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
       
-      // Return a proper JSON-RPC error
-      return res.json({
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: error instanceof Error ? error.message : "Failed to process message",
-          data: error instanceof Error ? error.stack : undefined
-        },
-        id: body.id || null
-      });
+      // Check if headers have already been sent
+      if (!res.headersSent) {
+        // Return a proper JSON-RPC error
+        return res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: error instanceof Error ? error.message : "Failed to process message",
+            data: error instanceof Error ? error.stack : undefined
+          },
+          id: body.id || null
+        });
+      } else {
+        console.error("Headers already sent, cannot send error response");
+        // Try to end the response if it hasn't been ended yet
+        if (!res.writableEnded) {
+          res.end();
+        }
+      }
     }
   } catch (error) {
     console.error(`Error handling message for session ${sessionId}:`, error);
     
-    // Return a proper JSON-RPC error format
-    return res.json({
-      jsonrpc: '2.0',
-      error: {
-        code: -32603,
-        message: error instanceof Error ? error.message : "Failed to process message"
-      },
-      id: req.body.id || null
-    });
+    // Check if headers have already been sent
+    if (!res.headersSent) {
+      // Return a proper JSON-RPC error format
+      return res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : "Failed to process message"
+        },
+        id: req.body.id || null
+      });
+    } else {
+      console.error("Headers already sent, cannot send error response");
+      // Try to end the response if it hasn't been ended yet
+      if (!res.writableEnded) {
+        res.end();
+      }
+    }
   }
 });
 
