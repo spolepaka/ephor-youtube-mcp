@@ -73,15 +73,17 @@ app.get("/session", (req: Request, res: Response) => {
 
 // SSE endpoint
 app.get("/sse", async (req: Request, res: Response) => {
-  const sessionId = req.query.sessionId as string;
-  
-  if (!sessionId) {
-    res.status(400).json({ error: "Missing sessionId parameter." });
-    return;
-  }
+  // Use a provided session ID or create a default one
+  const sessionId = (req.query.sessionId as string) || 'default-session';
   
   try {
     console.log(`Creating SSE transport for session ${sessionId}`);
+    
+    // If there's an existing transport for this session ID, remove it
+    if (activeTransports.has(sessionId)) {
+      console.log(`Replacing existing transport for session ${sessionId}`);
+      activeTransports.delete(sessionId);
+    }
     
     // Create a transport
     const transport = new SSEServerTransport("/messages", res);
@@ -107,24 +109,19 @@ app.get("/sse", async (req: Request, res: Response) => {
 
 // Message endpoint with additional format handling
 app.post("/messages", async (req: Request, res: Response) => {
-  const sessionId = req.query.sessionId as string;
+  // Use a provided session ID or use the default one
+  const sessionId = (req.query.sessionId as string) || 'default-session';
   
   console.log(`Message received for session ${sessionId}`);
   console.log(`Active sessions: ${Array.from(activeTransports.keys()).join(', ')}`);
   console.log('Request body:', JSON.stringify(req.body, null, 2)); // Log the full request
-  
-  if (!sessionId) {
-    return res.status(400).json({ 
-      error: { code: -32602, message: "Missing sessionId parameter" }
-    });
-  }
   
   const transport = activeTransports.get(sessionId);
   
   if (!transport) {
     console.log(`Session ${sessionId} not found in active transports`);
     return res.status(404).json({ 
-      error: { code: -32000, message: "Session not found" }
+      error: { code: -32000, message: "No active connection found. Please connect to the SSE endpoint first." }
     });
   }
   
@@ -169,15 +166,12 @@ app.post("/messages", async (req: Request, res: Response) => {
 
 // Create a simplified endpoint for direct tool calls
 app.post("/simple-call", async (req: Request, res: Response) => {
-  const sessionId = req.query.sessionId as string;
+  // Make sessionId optional
+  const sessionId = (req.query.sessionId as string) || 'default-session';
   const { name, arguments: args } = req.body;
   
-  console.log(`Simple call for session ${sessionId}, tool: ${name}`);
+  console.log(`Simple call, tool: ${name}`);
   console.log('Arguments:', JSON.stringify(args, null, 2));
-  
-  if (!sessionId) {
-    return res.status(400).json({ error: "Missing sessionId" });
-  }
   
   if (!name || !args) {
     return res.status(400).json({ error: "Missing name or arguments" });
@@ -204,6 +198,13 @@ app.get("/test", (req: Request, res: Response) => {
   res.json({ status: "ok", message: "Server is working!" });
 });
 
+// Handle GET requests to /messages (needed for MCP SDK initialization)
+app.get("/messages", (req: Request, res: Response) => {
+  console.log('GET request to /messages endpoint received');
+  // Just return a 200 OK status to acknowledge the endpoint exists
+  res.status(200).json({ status: "ok", message: "Messages endpoint available for POST requests" });
+});
+
 // Start the server
 const PORT = 3002;
 app.listen(PORT, () => {
@@ -212,12 +213,12 @@ app.listen(PORT, () => {
   console.log('--------------------------------------------------');
   console.log('MCP Endpoints:');
   console.log(`  - Test Page: http://localhost:${PORT}/`);
-  console.log(`  - Session: http://localhost:${PORT}/session`);
-  console.log(`  - SSE: http://localhost:${PORT}/sse?sessionId=YOUR_SESSION_ID`);
-  console.log(`  - Messages: http://localhost:${PORT}/messages?sessionId=YOUR_SESSION_ID`);
+  console.log(`  - SSE: http://localhost:${PORT}/sse`);
+  console.log(`  - Messages: http://localhost:${PORT}/messages`);
+  console.log('  (Session ID is optional for both SSE and Messages endpoints)');
   console.log('--------------------------------------------------');
   console.log('Direct API Endpoints (No MCP):');
   console.log(`  - Test: http://localhost:${PORT}/test`);
-  console.log(`  - Simple Call: http://localhost:${PORT}/simple-call?sessionId=YOUR_SESSION_ID`);
+  console.log(`  - Simple Call: http://localhost:${PORT}/simple-call`);
   console.log('--------------------------------------------------');
 }); 

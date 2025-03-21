@@ -77,21 +77,14 @@
       resultsEl.scrollTop = resultsEl.scrollHeight;
     }
     
-    async function getSession() {
+    async function initializeConnection() {
       try {
-        log('Getting session ID...');
-        statusEl.textContent = 'Getting session ID...';
+        log('Connecting to SSE...');
+        statusEl.textContent = 'Connecting to server...';
         statusEl.className = 'status connecting';
         
-        const response = await fetch(`http://localhost:${PORT}/session`);
-        if (!response.ok) {
-          throw new Error(`Failed to get session: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        sessionId = data.sessionId;
-        log(`Got session ID: ${sessionId}`);
-        return sessionId;
+        // Connect directly to SSE without session ID
+        connectToSSE();
       } catch (error) {
         log(`Error getting session: ${error.message}`);
         statusEl.textContent = `Error: ${error.message}`;
@@ -100,25 +93,22 @@
       }
     }
     
-    async function connectSSE() {
-      if (!sessionId) {
-        await getSession();
-      }
-      
+    async function connectToSSE() {
       try {
         if (eventSource) {
           eventSource.close();
         }
         
-        log(`Connecting to SSE with session ${sessionId}...`);
+        log('Connecting to SSE...');
         statusEl.textContent = 'Connecting to server...';
         statusEl.className = 'status connecting';
         
-        eventSource = new EventSource(`http://localhost:${PORT}/sse?sessionId=${sessionId}`);
+        // Connect without session ID
+        eventSource = new EventSource(`http://localhost:${PORT}/sse`);
         
         eventSource.onopen = () => {
           log('SSE connection established');
-          statusEl.textContent = `Connected (Session: ${sessionId})`;
+          statusEl.textContent = 'Connected to server';
           statusEl.className = 'status connected';
           testBtn.disabled = false;
         };
@@ -143,15 +133,11 @@
     }
     
     async function testEchoTool() {
-      if (!sessionId) {
-        log('No session ID available');
-        return;
-      }
-      
       try {
         log('Calling echo tool...');
         
-        const response = await fetch(`http://localhost:${PORT}/messages?sessionId=${sessionId}`, {
+        // Call without session ID
+        const response = await fetch(`http://localhost:${PORT}/messages`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -188,7 +174,7 @@
       try {
         log('Calling echo tool via simple endpoint...');
         
-        const response = await fetch(`http://localhost:${PORT}/simple-call?sessionId=${sessionId || 'none'}`, {
+        const response = await fetch(`http://localhost:${PORT}/simple-call`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -220,7 +206,7 @@
     // Event listeners
     connectBtn.addEventListener('click', () => {
       sessionId = null; // Force getting a new session
-      connectSSE();
+      initializeConnection();
     });
     
     testBtn.addEventListener('click', testEchoTool);

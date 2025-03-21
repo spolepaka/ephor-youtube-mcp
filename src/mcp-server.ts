@@ -396,15 +396,10 @@ server.tool(
 
 // Set up SSE endpoint for MCP
 app.get("/sse", async (req: Request, res: Response) => {
-  const sessionId = req.query.sessionId as string;
+  // Use a provided session ID or create a default one
+  const sessionId = (req.query.sessionId as string) || 'default-session';
   
   console.log(`[${new Date().toISOString()}] GET /sse - SessionID: ${sessionId}`);
-  
-  if (!sessionId) {
-    console.log('Error: Missing sessionId parameter for SSE connection');
-    res.status(400).json({ error: "Missing sessionId parameter. Get a session ID from /session first." });
-    return;
-  }
   
   // Set CORS headers
   res.header('Access-Control-Allow-Origin', '*');
@@ -412,6 +407,13 @@ app.get("/sse", async (req: Request, res: Response) => {
   // Create a new SSE transport for this client
   console.log(`Creating SSE transport for session ${sessionId}`);
   const transport = new SSEServerTransport("/messages", res);
+  
+  // If there's an existing transport for this session ID, remove it
+  if (activeTransports.has(sessionId)) {
+    console.log(`Replacing existing transport for session ${sessionId}`);
+    activeTransports.delete(sessionId);
+    connectionCount--;
+  }
   
   // Store the transport with its session ID
   activeTransports.set(sessionId, transport);
@@ -446,7 +448,8 @@ app.get("/sse", async (req: Request, res: Response) => {
 
 // Set up message endpoint for client->server communication
 app.post("/messages", async (req: Request, res: Response) => {
-  const sessionId = req.query.sessionId as string;
+  // Use a provided session ID or use the default one
+  const sessionId = (req.query.sessionId as string) || 'default-session';
   
   console.log(`[${new Date().toISOString()}] POST /messages - SessionID: ${sessionId}`);
   console.log(`Active transports: ${Array.from(activeTransports.keys()).join(', ')}`);
@@ -455,24 +458,17 @@ app.post("/messages", async (req: Request, res: Response) => {
   // Log the request body for debugging
   console.log('Request body:', JSON.stringify(req.body));
   
-  if (!sessionId) {
-    console.log('Error: Missing sessionId parameter');
-    return res.status(400).json({ 
-      error: { 
-        code: -32602,
-        message: "Missing sessionId parameter" 
-      }
-    });
-  }
-  
   const transport = activeTransports.get(sessionId);
   
   if (!transport) {
+    // When no transport is found, give a helpful error message
     console.log(`Error: Session ${sessionId} not found in active transports`);
     return res.status(404).json({ 
       error: { 
         code: -32000,
-        message: "Session not found. Please create a new SSE connection." 
+        message: sessionId === 'default-session' 
+          ? "No active connection found. Please connect to the SSE endpoint first." 
+          : "Session not found. Please create a new SSE connection."
       }
     });
   }
@@ -774,6 +770,13 @@ app.get("/debug/session/:sessionId", (req: Request, res: Response) => {
   return res.json(transportInfo);
 });
 
+// Handle GET requests to /messages (needed for MCP SDK initialization)
+app.get("/messages", (req: Request, res: Response) => {
+  console.log('GET request to /messages endpoint received');
+  // Just return a 200 OK status to acknowledge the endpoint exists
+  res.status(200).json({ status: "ok", message: "Messages endpoint available for POST requests" });
+});
+
 // Start the server
 const PORT = 3000;
 app.listen(PORT, () => {
@@ -782,9 +785,9 @@ app.listen(PORT, () => {
   console.log('--------------------------------------------------');
   console.log('MCP Endpoints:');
   console.log(`  - Web Client: http://localhost:${PORT}/`);
-  console.log(`  - Session: http://localhost:${PORT}/session`);
-  console.log(`  - SSE: http://localhost:${PORT}/sse?sessionId=YOUR_SESSION_ID`);
-  console.log(`  - Messages: http://localhost:${PORT}/messages?sessionId=YOUR_SESSION_ID`);
+  console.log(`  - SSE: http://localhost:${PORT}/sse`);
+  console.log(`  - Messages: http://localhost:${PORT}/messages`);
+  console.log('  (Session ID is optional for both SSE and Messages endpoints)');
   console.log('--------------------------------------------------');
   console.log('Direct API Endpoints (No MCP):');
   console.log(`  - Test Page: http://localhost:${PORT}/direct-test`);
@@ -796,4 +799,4 @@ app.listen(PORT, () => {
   console.log(`  - Check Session: http://localhost:${PORT}/debug/session/YOUR_SESSION_ID`);
   console.log(`  - Server Status: http://localhost:${PORT}/status`);
   console.log('--------------------------------------------------');
-}); 
+});

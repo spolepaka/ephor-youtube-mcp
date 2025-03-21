@@ -220,20 +220,10 @@
     
     // Get a session ID and then connect to SSE
     async function initializeConnection() {
-      updateConnectionStatus('Getting session ID...');
+      updateConnectionStatus('Connecting to SSE endpoint...', 'connecting');
       
       try {
-        // Step 1: Get a session ID
-        const response = await fetch('http://localhost:3000/session');
-        if (!response.ok) {
-          throw new Error(`Failed to get session ID: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        sessionId = data.sessionId;
-        updateConnectionStatus(`Got session ID: ${sessionId}, connecting to SSE...`);
-        
-        // Step 2: Connect to SSE with the session ID
+        // No need to get a session ID first now, we can directly connect to SSE
         connectToSSE();
       } catch (error) {
         updateConnectionStatus(`Error: ${error.message}`, 'error');
@@ -243,23 +233,19 @@
     
     // Connect to SSE endpoint with session ID
     function connectToSSE() {
-      if (!sessionId) {
-        updateConnectionStatus('No session ID available', 'error');
-        return;
-      }
-      
-      // Close any existing connection
-      if (eventSource) {
-        eventSource.close();
-      }
-      
-      updateConnectionStatus(`Connecting with session ID: ${sessionId}...`);
-      
       try {
-        eventSource = new EventSource(`http://localhost:3000/sse?sessionId=${sessionId}`);
+        // Close any existing connection
+        if (eventSource) {
+          eventSource.close();
+        }
+        
+        updateConnectionStatus('Connecting to server...', 'connecting');
+        
+        // Connect without requiring a session ID
+        eventSource = new EventSource(`http://localhost:3000/sse`);
         
         eventSource.onopen = () => {
-          updateConnectionStatus(`Connected to MCP server (Session: ${sessionId})`, 'connected');
+          updateConnectionStatus('Connected to MCP server', 'connected');
           console.log('SSE connection established');
         };
         
@@ -278,15 +264,8 @@
       }
     }
     
-    // Initialize connection
-    initializeConnection();
-    
     // Helper function to send tool calls
     async function callTool(name, args) {
-      if (!sessionId) {
-        throw new Error('Not connected to server. Please wait for connection to establish.');
-      }
-      
       // Check if SSE connection is active
       if (!eventSource || eventSource.readyState !== 1) {
         // If not active, try to reconnect
@@ -302,7 +281,8 @@
         }
       }
       
-      const response = await fetch(`http://localhost:3000/messages?sessionId=${sessionId}`, {
+      // No need for session ID in the URL now
+      const response = await fetch(`http://localhost:3000/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -578,6 +558,9 @@
         resultsDiv.textContent = `Error with test server: ${error.message}`;
       }
     });
+
+    // Initialize connection
+    initializeConnection();
   </script>
 </body>
 </html> 
