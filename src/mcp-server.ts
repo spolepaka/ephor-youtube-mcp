@@ -268,10 +268,14 @@ const server = new McpServer({
 });
 
 // Map to store active transports
-const activeTransports = new Map<string, SSEServerTransport>();
+const activeTransports = new Map<string, {
+  connected: boolean;
+  response: Response;
+}>();
 
 // Track active connections
 let connectionCount = 0;
+let globalConnection: Response | null = null;
 
 // Add a simple test endpoint
 app.get("/test", (req: Request, res: Response) => {
@@ -395,282 +399,259 @@ server.tool(
 );
 
 // Set up SSE endpoint for MCP
-app.get("/sse", async (req: Request, res: Response) => {
-  // Use a provided session ID or create a default one
-  const sessionId = (req.query.sessionId as string) || 'default-session';
+app.get("/sse", (req: Request, res: Response) => {
+  console.log(`[${new Date().toISOString()}] SSE connection request received`);
   
-  console.log(`[${new Date().toISOString()}] GET /sse - SessionID: ${sessionId}`);
+  // Set CORS and SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   
-  // Set basic CORS header (let the transport handle the rest)
-  res.header('Access-Control-Allow-Origin', '*');
-  
-  // Create a new SSE transport for this client
-  console.log(`Creating SSE transport for session ${sessionId}`);
-  const transport = new SSEServerTransport("/messages", res);
-  
-  // If there's an existing transport for this session ID, remove it
-  if (activeTransports.has(sessionId)) {
-    console.log(`Replacing existing transport for session ${sessionId}`);
-    activeTransports.delete(sessionId);
-    if (connectionCount > 0) connectionCount--; // Prevent negative counts
-  }
-  
-  // Store the transport with its session ID
-  activeTransports.set(sessionId, transport);
-  connectionCount++;
-  
-  console.log(`Client connected with session ${sessionId} (Total connections: ${connectionCount})`);
-  console.log(`Active transports after connection: ${Array.from(activeTransports.keys()).join(', ')}`);
-  
-  // Debug the transport
-  console.log(`Transport type: ${transport.constructor.name}`);
-  
-  try {
-    console.log(`Connecting MCP server to transport for session ${sessionId}`);
-    
-    // Let the MCP transport handle everything (including headers and SSE setup)
-    await server.connect(transport);
-    console.log(`MCP server successfully connected to transport for session ${sessionId}`);
-    
-    // Handle client disconnect
-    req.on('close', () => {
-      console.log(`Cleaning up on disconnect for session ${sessionId}`);
-      
-      if (activeTransports.has(sessionId)) {
-        activeTransports.delete(sessionId);
-        if (connectionCount > 0) connectionCount--; // Prevent negative counts
-        console.log(`Client with session ${sessionId} disconnected (Total connections: ${connectionCount})`);
-        console.log(`Active transports after disconnect: ${Array.from(activeTransports.keys()).join(', ')}`);
-      }
-    });
-  } catch (error) {
-    console.error(`Error connecting transport for session ${sessionId}:`, error);
-    console.log(`Cleaning up on error for session ${sessionId}`);
-    
-    if (activeTransports.has(sessionId)) {
-      activeTransports.delete(sessionId);
-      if (connectionCount > 0) connectionCount--; // Prevent negative counts
-    }
-    console.log(`Active transports after error: ${Array.from(activeTransports.keys()).join(', ')}`);
-    
-    // End the response since we couldn't connect properly
+  // Keep connection alive
+  const keepAlive = setInterval(() => {
     if (!res.writableEnded) {
-      res.end();
+      res.write(": keepalive\n\n");
+    } else {
+      clearInterval(keepAlive);
+      console.log("Connection ended, clearing keepalive");
     }
-  }
+  }, 15000);
+  
+  // Log connection
+  console.log("SSE connection established");
+  globalConnection = res;
+  connectionCount = 1;
+  
+  // Handle disconnection
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    globalConnection = null;
+    connectionCount = 0;
+    console.log("SSE connection closed");
+  });
 });
 
 // Set up message endpoint for client->server communication
-app.post("/messages", async (req: Request, res: Response) => {
-  // Use a provided session ID or use the default one
-  const sessionId = (req.query.sessionId as string) || 'default-session';
+app.post("/messages", (req: Request, res: Response) => {
+  console.log(`[${new Date().toISOString()}] Message received: ${JSON.stringify(req.body)}`);
   
-  console.log(`[${new Date().toISOString()}] POST /messages - SessionID: ${sessionId}`);
-  console.log(`Active transports: ${Array.from(activeTransports.keys()).join(', ')}`);
-  console.log(`Transport for session ${sessionId} exists: ${activeTransports.has(sessionId)}`);
+  // Extract key info from request
+  const body = req.body;
+  const id = body.id || null;
+  const method = body.method || "";
   
-  // Log the request body for debugging
-  console.log('Request body:', JSON.stringify(req.body));
-  
-  const transport = activeTransports.get(sessionId);
-  
-  if (!transport) {
-    // When no transport is found, give a helpful error message
-    console.log(`Error: Session ${sessionId} not found in active transports`);
-    return res.status(404).json({ 
-      error: { 
-        code: -32000,
-        message: sessionId === 'default-session' 
-          ? "No active connection found. Please connect to the SSE endpoint first." 
-          : "Session not found. Please create a new SSE connection."
-      }
+  // Handle initialization
+  if (method === 'initialize') {
+    console.log("Handling initialization request");
+    return res.json({
+      jsonrpc: "2.0",
+      result: {
+        serverInfo: {
+          name: "youtube-mcp",
+          version: "1.0.0"
+        },
+        protocolVersion: "2024-11-05",
+        tools: [
+          {
+            name: "youtube_search",
+            description: "Search for YouTube videos",
+            schema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "The search query" },
+                limit: { type: "number", description: "Maximum number of results (1-10)", default: 5 }
+              },
+              required: ["query"]
+            }
+          },
+          {
+            name: "youtube_get_video_info",
+            description: "Get information about a YouTube video",
+            schema: {
+              type: "object",
+              properties: {
+                input: { type: "string", description: "YouTube video ID or URL" }
+              },
+              required: ["input"]
+            }
+          },
+          {
+            name: "youtube_get_transcript",
+            description: "Get the transcript of a YouTube video",
+            schema: {
+              type: "object",
+              properties: {
+                input: { type: "string", description: "YouTube video ID or URL" }
+              },
+              required: ["input"]
+            }
+          },
+          {
+            name: "echo",
+            description: "Echo a message back",
+            schema: {
+              type: "object",
+              properties: {
+                message: { type: "string", description: "Message to echo back" }
+              },
+              required: ["message"]
+            }
+          }
+        ]
+      },
+      id
     });
   }
   
-  try {
-    console.log(`Handling message for session ${sessionId}`);
+  // Handle tool calls
+  if (method === 'call_tool' && body.params) {
+    const toolName = body.params.name;
+    const args = body.params.arguments || {};
     
-    // Handle special case for tool calls to avoid MCP issues
-    const body = req.body;
-    if (body.method === 'call_tool' && body.jsonrpc === '2.0' && body.params) {
-      const { name, arguments: args } = body.params;
-      
-      console.log(`Tool call detected: ${name}`);
-      
-      // Handle echo tool
-      if (name === 'echo' && args.message) {
-        console.log(`Custom handling for echo with message: ${args.message}`);
-        return res.json({
-          jsonrpc: '2.0',
-          result: {
-            content: [{ type: "text", text: `You said: ${args.message}` }]
-          },
-          id: body.id
-        });
-      }
-      
-      // Handle YouTube search
-      if (name === 'youtube_search' && args.query) {
-        console.log(`Custom handling for youtube_search with query: ${args.query}`);
-        try {
-          const results = await performYouTubeSearch(args.query, args.limit || 5);
-          return res.json({
-            jsonrpc: '2.0',
-            result: {
-              content: [{ type: "text", text: JSON.stringify(results) }]
-            },
-            id: body.id
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          return res.json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32000,
-              message: `Error performing search: ${errorMessage}`
-            },
-            id: body.id
-          });
-        }
-      }
-      
-      // Handle video info
-      if (name === 'youtube_get_video_info' && args.input) {
-        console.log(`Custom handling for youtube_get_video_info with input: ${args.input}`);
-        try {
-          const videoId = extractVideoId(args.input);
-          if (!videoId) {
-            return res.json({
-              jsonrpc: '2.0',
-              error: {
-                code: -32000,
-                message: `Invalid YouTube video ID or URL: ${args.input}`
-              },
-              id: body.id
-            });
-          }
-          
-          const result = await getVideoInfo(videoId);
-          return res.json({
-            jsonrpc: '2.0',
-            result: {
-              content: [{ type: "text", text: JSON.stringify(result) }]
-            },
-            id: body.id
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          return res.json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32000,
-              message: `Error fetching video info: ${errorMessage}`
-            },
-            id: body.id
-          });
-        }
-      }
-      
-      // Handle transcript
-      if (name === 'youtube_get_transcript' && args.input) {
-        console.log(`Custom handling for youtube_get_transcript with input: ${args.input}`);
-        try {
-          const videoId = extractVideoId(args.input);
-          if (!videoId) {
-            return res.json({
-              jsonrpc: '2.0',
-              error: {
-                code: -32000,
-                message: `Invalid YouTube video ID or URL: ${args.input}`
-              },
-              id: body.id
-            });
-          }
-          
-          const { transcript, videoInfo } = await extractTranscript(videoId);
-          const result = { videoId, videoInfo, transcript };
-          return res.json({
-            jsonrpc: '2.0',
-            result: {
-              content: [{ type: "text", text: JSON.stringify(result) }]
-            },
-            id: body.id
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          return res.json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32000,
-              message: `Error fetching transcript: ${errorMessage}`
-            },
-            id: body.id
-          });
-        }
-      }
-    } else {
-      console.log('Request does not match expected format for tool calls:');
-      console.log(`Method: ${body.method}`);
-      console.log(`JSON-RPC version: ${body.jsonrpc}`);
-      console.log(`Has params: ${!!body.params}`);
-      
-      if (body.params) {
-        console.log(`Params name: ${body.params.name}`);
-        console.log(`Params arguments: ${JSON.stringify(body.params.arguments)}`);
-      }
-    }
+    console.log(`Tool call: ${toolName} with args:`, args);
     
-    // If no special case matched, try the regular MCP handling
-    try {
-      await transport.handlePostMessage(req, res);
-      console.log(`Successfully handled message for session ${sessionId}`);
-    } catch (error) {
-      console.error(`MCP transport error:`, error);
-      console.error(`Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
-      
-      // Check if headers have already been sent
-      if (!res.headersSent) {
-        // Return a proper JSON-RPC error
-        return res.status(500).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32603,
-            message: error instanceof Error ? error.message : "Failed to process message",
-            data: error instanceof Error ? error.stack : undefined
-          },
-          id: body.id || null
-        });
-      } else {
-        console.error("Headers already sent, cannot send error response");
-        // Try to end the response if it hasn't been ended yet
-        if (!res.writableEnded) {
-          res.end();
-        }
-      }
-    }
-  } catch (error) {
-    console.error(`Error handling message for session ${sessionId}:`, error);
-    
-    // Check if headers have already been sent
-    if (!res.headersSent) {
-      // Return a proper JSON-RPC error format
-      return res.status(500).json({
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: error instanceof Error ? error.message : "Failed to process message"
+    // Handle echo tool
+    if (toolName === 'echo' && args.message) {
+      console.log(`Echo tool: ${args.message}`);
+      return res.json({
+        jsonrpc: "2.0",
+        result: {
+          content: [{ type: "text", text: `You said: ${args.message}` }]
         },
-        id: req.body.id || null
+        id
       });
-    } else {
-      console.error("Headers already sent, cannot send error response");
-      // Try to end the response if it hasn't been ended yet
-      if (!res.writableEnded) {
-        res.end();
-      }
     }
+    
+    // Handle YouTube search
+    if (toolName === 'youtube_search' && args.query) {
+      return handleYouTubeSearch(args.query, args.limit || 5, id, res);
+    }
+    
+    // Handle Video Info
+    if (toolName === 'youtube_get_video_info' && args.input) {
+      return handleVideoInfo(args.input, id, res);
+    }
+    
+    // Handle Transcript
+    if (toolName === 'youtube_get_transcript' && args.input) {
+      return handleTranscript(args.input, id, res);
+    }
+    
+    // Unknown tool
+    return res.json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32601,
+        message: `Unknown tool: ${toolName}`
+      },
+      id
+    });
   }
+  
+  // Unknown method
+  return res.json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32601,
+      message: `Unknown method: ${method}`
+    },
+    id
+  });
 });
+
+// Helper functions for handling YouTube tools
+async function handleYouTubeSearch(query: string, limit: number, id: string | null, res: Response) {
+  try {
+    const results = await performYouTubeSearch(query, limit);
+    return res.json({
+      jsonrpc: "2.0",
+      result: {
+        content: [{ type: "text", text: JSON.stringify(results) }]
+      },
+      id
+    });
+  } catch (error) {
+    return res.json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: error instanceof Error ? error.message : "Unknown error"
+      },
+      id
+    });
+  }
+}
+
+async function handleVideoInfo(input: string, id: string | null, res: Response) {
+  try {
+    const videoId = extractVideoId(input);
+    if (!videoId) {
+      return res.json({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: `Invalid YouTube video ID or URL: ${input}`
+        },
+        id
+      });
+    }
+    
+    const result = await getVideoInfo(videoId);
+    return res.json({
+      jsonrpc: "2.0",
+      result: {
+        content: [{ type: "text", text: JSON.stringify(result) }]
+      },
+      id
+    });
+  } catch (error) {
+    return res.json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: error instanceof Error ? error.message : "Unknown error"
+      },
+      id
+    });
+  }
+}
+
+async function handleTranscript(input: string, id: string | null, res: Response) {
+  try {
+    const videoId = extractVideoId(input);
+    if (!videoId) {
+      return res.json({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: `Invalid YouTube video ID or URL: ${input}`
+        },
+        id
+      });
+    }
+    
+    const { transcript, videoInfo } = await extractTranscript(videoId);
+    const result = { videoId, videoInfo, transcript };
+    
+    return res.json({
+      jsonrpc: "2.0",
+      result: {
+        content: [{ type: "text", text: JSON.stringify(result) }]
+      },
+      id
+    });
+  } catch (error) {
+    return res.json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: error instanceof Error ? error.message : "Unknown error"
+      },
+      id
+    });
+  }
+}
 
 // Set up a specific route for the index.html file
 app.get("/", (req: Request, res: Response) => {
@@ -682,6 +663,7 @@ app.get("/status", (req: Request, res: Response) => {
   res.json({
     status: "online",
     activeConnections: connectionCount,
+    hasGlobalConnection: globalConnection !== null,
     tools: [
       {
         name: "youtube_search",
@@ -694,6 +676,10 @@ app.get("/status", (req: Request, res: Response) => {
       {
         name: "youtube_get_transcript",
         description: "Get the transcript of a YouTube video"
+      },
+      {
+        name: "echo",
+        description: "Echo a message back"
       }
     ]
   });
@@ -778,28 +764,15 @@ app.get('/direct-test', (req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'direct-youtube.html'));
 });
 
-// Add a debug endpoint to check session details
-app.get("/debug/session/:sessionId", (req: Request, res: Response) => {
-  const sessionId = req.params.sessionId;
-  const transport = activeTransports.get(sessionId);
-  
-  if (!transport) {
-    return res.json({
-      exists: false,
-      message: "Session not found in active transports"
-    });
-  }
-  
-  // Get info about the transport
-  const transportInfo = {
-    exists: true,
-    isConnected: true,
-    sessionId: sessionId,
-    activeTransports: Array.from(activeTransports.keys()),
+// Add a debug endpoint to check connection state
+app.get("/debug/connection", (req: Request, res: Response) => {
+  const connectionInfo = {
+    hasGlobalConnection: globalConnection !== null,
+    isConnectionActive: globalConnection ? !globalConnection.writableEnded : false,
     totalConnections: connectionCount
   };
   
-  return res.json(transportInfo);
+  return res.json(connectionInfo);
 });
 
 // Handle GET requests to /messages (needed for MCP SDK initialization)
@@ -811,7 +784,7 @@ app.get("/messages", (req: Request, res: Response) => {
 
 // Start the server
 const PORT = 3000;
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log('--------------------------------------------------');
   console.log(`YouTube MCP Server running on http://localhost:${PORT}`);
   console.log('--------------------------------------------------');
